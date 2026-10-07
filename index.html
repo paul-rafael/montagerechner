@@ -238,14 +238,14 @@ input[type=date]{width:100%;border:1px solid var(--border2);border-radius:6px;pa
     <div class="grid5">
       <label class="field"><span>Monat</span><select id="monat"></select></label>
       <label class="field"><span>Jahr</span><select id="jahr"></select></label>
-      <label class="field"><span id="grundgehalt-label">Grundgehalt (€/Mon)</span><input type="number" id="grundgehalt" value="3000" step="10"></label>
-      <label class="field"><span id="stundensatz-label">Stundensatz (€/h)</span><input type="number" id="stundensatz" value="20" step="0.01" readonly tabindex="-1" style="background:var(--sep);color:var(--muted);cursor:default;" title="Wird automatisch berechnet: Grundgehalt / Stundenteiler"></label>
-      <label class="field"><span>Taggeld (€/Tag)</span><input type="number" id="taggeld" value="70" step="1"></label>
+      <label class="field"><span id="grundgehalt-label">Grundgehalt (€/Mon)</span><input type="number" id="grundgehalt" value="0" step="10"></label>
+      <label class="field"><span id="stundensatz-label">Stundensatz (€/h)</span><input type="number" id="stundensatz" value="0" step="0.01" readonly tabindex="-1" style="background:var(--sep);color:var(--muted);cursor:default;" title="Wird automatisch berechnet: Grundgehalt / Stundenteiler"></label>
+      <label class="field"><span>Taggeld (€/Tag)</span><input type="number" id="taggeld" value="0" step="1"></label>
     </div>
     <div style="border-top:1px solid var(--sep);margin-top:14px;padding-top:14px;">
       <p class="section-label" style="margin-bottom:10px;">ZA-Stundentopf</p>
       <div class="grid5">
-        <label class="field"><span>Topf-Maximum (h)</span><input type="number" id="zaTopfMax" value="160" step="1" min="0"></label>
+        <label class="field"><span>Topf-Maximum (h, 0 = keins)</span><input type="number" id="zaTopfMax" value="0" step="1" min="0"></label>
         <label class="field"><span>Aktueller Stand (h)</span><input type="number" id="zaTopfStart" value="0" step="0.25" min="-999"></label>
       </div>
       <div id="za-gauge-wrap" style="margin-top:12px;"></div>
@@ -403,7 +403,7 @@ input[type=date]{width:100%;border:1px solid var(--border2);border-radius:6px;pa
       <label class="field"><span>Grundgehalt (€/Mon)</span><input type="number" id="s-grundgehalt" step="10"></label>
       <label class="field"><span>Stundenteiler (Gehalt / x)</span><input type="number" id="s-teiler" step="1" min="1"></label>
       <label class="field"><span>Taggeld (€/Tag)</span><input type="number" id="s-taggeld" step="1"></label>
-      <label class="field"><span>ZA-Topf Max (h)</span><input type="number" id="s-zaTopfMax" step="1" min="0"></label>
+      <label class="field"><span>ZA-Topf Max (h, 0 = keins)</span><input type="number" id="s-zaTopfMax" step="1" min="0"></label>
     </div>
     <label class="dd-label" style="margin-top:8px;"><input type="checkbox" id="s-lehrling"> Lehrling</label>
     <div class="subsec">
@@ -506,7 +506,7 @@ function dayFeiertag(date,dd){
 const SOURCE_HTML=(()=>{const c=document.documentElement.cloneNode(true);c.removeAttribute('data-theme');return'<!DOCTYPE html>\n'+c.outerHTML})()
 
 // ── Einstellungen (in HTML eingebettet + localStorage, neuere Quelle gewinnt) ─
-const DEFAULT_SETTINGS={grundgehalt:3000,teiler:143,land:'AT',region:'',taggeld:70,zaTopfMax:160,lehrling:false,
+const DEFAULT_SETTINGS={grundgehalt:0,teiler:143,land:'AT',region:'',taggeld:0,zaTopfMax:0,lehrling:false,
   buero:8.25,bueroFr:5.5,ho:8.25,hoFr:5.5,montage:10,reiseArbeit:10,reisezeit:0,theme:'auto',
   turnus:{customOn:12,customOff:2,stunden:10,reise:false,reiseArbeit:0,reisezeit:8,za:true}}
 function readEmbeddedSettings(){try{return JSON.parse(document.getElementById('embedded-settings').textContent||'{}')}catch(e){return{}}}
@@ -1147,14 +1147,14 @@ function render(){
           Saldo Ende Monat: <strong style="color:${labelColor};">${saldo>=0?'+':''}${fmtH(saldo)} h</strong>
           ${ueberlauf>0?`<span style="color:#d97706;font-size:11px;"> (${fmtH(ueberlauf)} h Überlauf → Grundverg. + 50%)</span>`:''}
         </span>
-        <span style="font-size:12px;color:var(--faint);">${fmtH(Math.max(0,ende))} / ${fmtH(max)} h</span>
+        <span style="font-size:12px;color:var(--faint);">${max>0?fmtH(Math.max(0,ende))+' / '+fmtH(max)+' h':'kein Maximum'}</span>
       </div>
       <div style="height:10px;background:var(--sep);border-radius:999px;overflow:hidden;">
         <div style="height:100%;width:${pct}%;background:${barColor};border-radius:999px;transition:width .3s;"></div>
       </div>
       <div style="display:flex;justify-content:space-between;margin-top:5px;flex-wrap:wrap;gap:2px;">
         <span style="font-size:11px;color:var(--faint);">Start: ${fmtH(lz.zaTopfStart)} h &nbsp;|&nbsp; Monat: ${neuSign}${fmtH(lz.zaTopfNeu)} h</span>
-        <span style="font-size:11px;color:var(--faint);">Maximum: ${fmtH(max)} h</span>
+        <span style="font-size:11px;color:var(--faint);">${max>0?'Maximum: '+fmtH(max)+' h':''}</span>
       </div>`
   }
 
