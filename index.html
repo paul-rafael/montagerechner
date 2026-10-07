@@ -579,12 +579,34 @@ function getWeeksOfMonth(m,y){const last=new Date(y,m,0);const weeks=[];let week
 function r(n){return Math.round(n*100)/100}
 function fmt(n){return n.toLocaleString('de-AT',{minimumFractionDigits:2,maximumFractionDigits:2})}
 function fmtH(n){return n.toLocaleString('de-AT',{minimumFractionDigits:2,maximumFractionDigits:2})}
-// SV-Dienstnehmeranteil. Lehrlinge: KV 1,67% + PV 10,25% + AV 1,15% (reduziert bei geringem Entgelt),
-// keine AK-Umlage, kein Wohnbauförderungsbeitrag. Werte 2026 lt. sozialversicherung.gv.at
-function svRate(basis){
-  if(!state.lehrling) return 0.1812
-  const av=basis<=2225?0:basis<=2427?0.01:0.0115
-  return 0.0167+0.1025+av
+// ── Werte 2026 (ÖGK, BMF, WKO) ───────────────────────────────────────────────
+const W={
+  hbglMonat:6930, hbglSZJahr:13860,                       // Höchstbeitragsgrundlage lfd / Sonderzahlungen
+  svKV:0.0387, svPV:0.1025, svAV:0.0295, svAK:0.005, svWBF:0.005,
+  lehrKV:0.0167, lehrAV:0.0115,                            // Lehrlinge: keine AK-Umlage, kein WBF
+  tarif:[[13539,0],[21992,0.2],[36458,0.3],[70365,0.4],[104859,0.48],[1000000,0.5],[Infinity,0.55]],
+  vab:496, wkPausch:132,                                   // Verkehrsabsetzbetrag, Werbungskostenpauschale (jährlich)
+  frei68_1:400,                                            // §68/1: Sonn-/Feiertagszuschläge + Feiertagsarbeitsentgelt
+  frei68_2:170, frei68_2Std:15,                            // §68/2: Überstundenzuschläge, erste 15 h, max. 50% Grundlohn
+  szFreibetrag:620, szFreigrenze:2100, szSatz:0.06,        // §67 Sonderzahlungen
+  hoMaxTag:3
+}
+// Steuer- und SV-freies Taggeld pro Tag (Inland bzw. Auslandsreisesatz BMF/WKO 2026)
+const TAGGELD_FREI={AT:30,DE:35.3,CH:36.8,FR:32.7,IT:35.8,NL:35.3,BE:35.3,LU:35.3,ES:34.2}
+// AV-Dienstnehmeranteil ist bei geringem Entgelt reduziert
+function avSatz(b){
+  if(b<=2225)return 0
+  if(b<=2427)return 0.01
+  if(state.lehrling)return W.lehrAV
+  return b<=2630?0.02:W.svAV
+}
+function svSatzLfd(b){return state.lehrling?W.lehrKV+W.svPV+avSatz(b):W.svKV+W.svPV+avSatz(b)+W.svAK+W.svWBF}
+function svSatzSZ(b){return state.lehrling?W.lehrKV+W.svPV+avSatz(b):W.svKV+W.svPV+avSatz(b)}  // ohne AK-Umlage/WBF
+// Lohnsteuer laufender Monatsbezug: Bemessungsgrundlage ×12 → Tarif → − Verkehrsabsetzbetrag → ÷12
+function lstMonat(bmg){
+  const j=Math.max(0,bmg)*12;let st=0,prev=0
+  for(const [g,satz] of W.tarif){if(j>prev)st+=(Math.min(j,g)-prev)*satz;if(j<=g)break;prev=g}
+  return r(Math.max(0,st-W.vab)/12)
 }
 function svLabel(rate){return (rate*100).toLocaleString('de-AT',{minimumFractionDigits:2,maximumFractionDigits:2})+'%'}
 function nazForDate(date){const dow=date.getDay();return (isFT(date)&&dow!==0&&dow!==6)?0:NAZ[dow]}
@@ -643,7 +665,7 @@ function berechneTag(date,dd){
   // grundStd = Stunden die EXTRA zum Grundgehalt ausbezahlt werden
   //          = Sa/So/Ft: alle Stunden; Mo–Fr: nur Stunden >10h (§68/2)
   function calcStunden(g, dow, isSonntag, isFeiertag){
-    let zaTopf=0, ue50=0, ue68_1=0, ue68_2=0, grundStd=0
+    let zaTopf=0, ue50=0, ue68_1=0, ue68_2=0, grundStd=0, ueFt=0
     const nazLocal = NAZ[dow]
 
     if(isSonntag){
@@ -654,6 +676,7 @@ function berechneTag(date,dd){
       // ALLE Stunden: Grundvergütung + §68/2 (100%).
       grundStd = g
       ue68_2 = g
+      ueFt = g
     } else if(dow===6){
       // ALLE Stunden: Grundvergütung + 50% Zuschlag. Keine >10h-Staffel.
       grundStd = g
@@ -672,7 +695,7 @@ function berechneTag(date,dd){
       if(g < nazLocal) zaTopf = g - nazLocal
       else zaTopf = Math.min(Math.max(0, g - nazLocal), Math.max(0, 10 - nazLocal))
     }
-    return{zaTopf, ue50, ue68_1, ue68_2, grundStd}
+    return{zaTopf, ue50, ue68_1, ue68_2, grundStd, ueFt}
   }
 
   const isSonntag = realDow===0
@@ -681,10 +704,10 @@ function berechneTag(date,dd){
   if(mode==='buero'||mode==='homeoffice'){
     const g=dd.stunden
     const nazG=Math.min(g,naz)
-    const {zaTopf,ue50,ue68_1,ue68_2,grundStd}=calcStunden(g,realDow,isSonntag,isFeiertag)
+    const {zaTopf,ue50,ue68_1,ue68_2,grundStd,ueFt}=calcStunden(g,realDow,isSonntag,isFeiertag)
     return{datum:date,wochentag:realDow,istFeiertag:ft,ftName,
       arbStunden:g,fahrzeit:0,gesamtStunden:g,nazStunden:nazG,
-      zaTopfStunden:zaTopf,ueStd50:ue50,ueStd100_68_1:ue68_1,ueStd100_68_2:ue68_2,
+      zaTopfStunden:zaTopf,ueStd50:ue50,ueStd100_68_1:ue68_1,ueStd100_68_2:ue68_2,ueStdFt:ueFt,
       grundStd,lenkzeit:0,onSiteStunden:0,ruheNeu:isSonntag?g:0,ruheVerbrauch:0,abwStunden:0,
       istMontage:false,isBuero:mode==='buero',isHO:mode==='homeoffice'}
   }
@@ -720,12 +743,12 @@ function berechneTag(date,dd){
   // Reisetage gelten als voller Arbeitstag: weniger Stunden als NAZ ziehen KEINE ZA ab
   const nazG=istReise?nazT:Math.min(g,nazT)
   const calc=calcStunden(g,calcDow,sonntagT,isFeiertag)
-  const {ue50,ue68_1,ue68_2,grundStd}=calc
+  const {ue50,ue68_1,ue68_2,grundStd,ueFt}=calc
   const zaTopf=istReise?Math.max(0,calc.zaTopf):calc.zaTopf
 
   return{datum:date,wochentag:realDow,istFeiertag:ft,ftName,
     arbStunden,fahrzeit,gesamtStunden:g,nazStunden:nazG,zaTopfStunden:zaTopf,
-    ueStd50:ue50,ueStd100_68_1:ue68_1,ueStd100_68_2:ue68_2,
+    ueStd50:ue50,ueStd100_68_1:ue68_1,ueStd100_68_2:ue68_2,ueStdFt:ueFt,land:dd.land||'AT',
     grundStd,lenkzeit,ruheNeu:sonntagT?g:0,ruheVerbrauch:0,abwStunden:0,tausch,
     onSiteStunden:arbStunden,istMontage:true,isBuero:false,isHO:false}
 }
@@ -804,74 +827,63 @@ function berechneLohnzettel(alleTage,grundgehalt,stundensatz,taggeld,zaTopfMax,z
   const ueGrundB=r(ueGrundStd*stundensatz),onSiteB=r(onSiteStd*1.4),tgB=r(mt.length*taggeld)
   const lkB=r(lenkzeit*stundensatz*0.5),hoPauschale=r(hoTage.length*1.0)
 
-  // SV-Satz (Lehrling: reduziert, abhängig vom laufenden Bezug)
-  const lfdBrutto=r(grundgehalt+ue50B+ue68_1B+ue68_2B+ueGrundB+onSiteB+tgB+lkB+hoPauschale+zaUeberlaufZuschlagB)
-  const svR=svRate(lfdBrutto)
-
-  // ── Urlaubsgeld §67 EStG ──────────────────────────────────────────────────
-  // Jahressechstel = 1/6 des voraussichtlichen Jahresbezugs (Näherung: 2× Monatsbrutto ohne Sonderzahlungen)
-  // Begünstigter Teil: 6% pauschal; Überschuss: normal versteuert
-  const ugBrutto = urlaubsgeldAktiv ? urlaubsgeldBetrag : 0
-  const jahressechstel = r(grundgehalt * 2)  // Näherung: 2 Monatsgehälter
-  const ugBegunstigt = r(Math.min(ugBrutto, jahressechstel))
-  const ugUeberUeberschuss = r(Math.max(0, ugBrutto - jahressechstel))
-  // SV auf Urlaubsgeld (Satz wie lfd. Bezug)
-  const ugSV = r(ugBrutto * svR)
-  // Lohnsteuer auf begünstigten Teil: 6% (§67 Abs.1 EStG)
-  const ugLS_beg = r(ugBegunstigt * 0.06)
-  // Lohnsteuer auf Überschuss: wie normaler Bezug (progressiv — vereinfacht mit laufendem Tarif)
-  let ugLS_ueb = 0
-  if(ugUeberUeberschuss > 0){
-    const zvU = Math.max(0, ugUeberUeberschuss - r(ugUeberUeberschuss * svR))
-    if(zvU<=1503) ugLS_ueb=0
-    else if(zvU<=2041) ugLS_ueb=(zvU-1503)*0.2
-    else if(zvU<=3276) ugLS_ueb=(zvU-2041)*0.32+107.6
-    else if(zvU<=5021) ugLS_ueb=(zvU-3276)*0.42+502.8
-    else if(zvU<=7101) ugLS_ueb=(zvU-5021)*0.48+1235.7
-    else ugLS_ueb=(zvU-7101)*0.5+2234.1
-    ugLS_ueb=r(ugLS_ueb)
-  }
-  const ugNetto = r(ugBrutto - ugSV - ugLS_beg - ugLS_ueb)
-
   // ── Extras (Prämien & Zuschläge) ─────────────────────────────────────────
-  const extrasCalc=(extras||[]).map(ex=>{
-    const b=ex.betrag||0
-    if(ex.steuer==='steuerfrei'){
-      return{...ex,brutto:b,sv:0,ls:0,netto:b,steuerfrei:b,stpfl:0}
-    } else if(ex.steuer==='begunstigt'){
-      // §67: 6% Pauschalsteuer, volle SV
-      const sv=r(b*svR),ls=r(b*0.06)
-      return{...ex,brutto:b,sv,ls,netto:r(b-sv-ls),steuerfrei:0,stpfl:b}
-    } else {
-      // Steuerpflichtig: normal SV + progressiv
-      const sv=r(b*svR),zvE=Math.max(0,b-sv)
-      let ls=0
-      if(zvE<=1503)ls=0;else if(zvE<=2041)ls=(zvE-1503)*0.2;else if(zvE<=3276)ls=(zvE-2041)*0.32+107.6;
-      else if(zvE<=5021)ls=(zvE-3276)*0.42+502.8;else if(zvE<=7101)ls=(zvE-5021)*0.48+1235.7;else ls=(zvE-7101)*0.5+2234.1
-      ls=r(ls)
-      return{...ex,brutto:b,sv,ls,netto:r(b-sv-ls),steuerfrei:0,stpfl:b}
-    }
-  })
-  const extrasBruttoTotal=r(extrasCalc.reduce((s,e)=>s+e.brutto,0))
-  const extrasSteuerfreiTotal=r(extrasCalc.reduce((s,e)=>s+e.steuerfrei,0))
-  const extrasSVTotal=r(extrasCalc.reduce((s,e)=>s+e.sv,0))
-  const extrasLSTotal=r(extrasCalc.reduce((s,e)=>s+e.ls,0))
+  // steuerfrei → steuer- und SV-frei; stpfl → zum laufenden Bezug; begünstigt → Sonderzahlung §67
+  const extrasCalc=(extras||[]).map(ex=>({...ex,brutto:ex.betrag||0}))
+  const exSum=k=>r(extrasCalc.filter(e=>e.steuer===k).reduce((s,e)=>s+e.brutto,0))
+  const extrasFrei=exSum('steuerfrei'),extrasLfd=exSum('stpfl'),extrasSZ=exSum('begunstigt')
+  const extrasBruttoTotal=r(extrasFrei+extrasLfd+extrasSZ)
 
-  const summeBrutto=r(grundgehalt+ue50B+ue68_1B+ue68_2B+ueGrundB+onSiteB+tgB+lkB+hoPauschale+zaUeberlaufZuschlagB+ugBrutto+extrasBruttoTotal)
-  const steuerfreiB=tgB+ue50B+ue68_1B+ue68_2B+extrasSteuerfreiTotal,stpflB=r(summeBrutto-steuerfreiB-ugBrutto-extrasBruttoTotal)
-  const svB=r((summeBrutto-ugBrutto-extrasBruttoTotal)*svR)
-  const svT=r(stpflB*svR),zvB=Math.max(0,stpflB-svT)
-  let ls=0
-  if(zvB<=1503)ls=0;else if(zvB<=2041)ls=(zvB-1503)*0.2;else if(zvB<=3276)ls=(zvB-2041)*0.32+107.6;
-  else if(zvB<=5021)ls=(zvB-3276)*0.42+502.8;else if(zvB<=7101)ls=(zvB-5021)*0.48+1235.7;else ls=(zvB-7101)*0.5+2234.1
-  ls=r(ls)
-  const netto=r(summeBrutto-svB-ugSV-extrasSVTotal-ls-ugLS_beg-ugLS_ueb-extrasLSTotal)
+  // ── Laufende Bezüge ──────────────────────────────────────────────────────
+  const lfdBrutto=r(grundgehalt+ue50B+ue68_1B+ue68_2B+ueGrundB+onSiteB+tgB+lkB+hoPauschale+zaUeberlaufZuschlagB+extrasLfd)
+
+  // Taggeld: steuer-/SV-frei bis zum Satz des Einsatzlandes, Rest steuerpflichtig
+  const tgFrei=r(mt.reduce((s,t)=>s+Math.min(taggeld,TAGGELD_FREI[t.land]||TAGGELD_FREI.AT),0))
+  const tgStpfl=r(tgB-tgFrei)
+  const hoFrei=r(Math.min(hoPauschale,hoTage.length*W.hoMaxTag))
+
+  // §68/1: Sonntags- und Feiertagszuschläge + Feiertagsarbeitsentgelt, zusammen max. 400 €
+  const ftStd=r(alleTage.reduce((s,t)=>s+(t.ueStdFt||0),0))
+  const topf68_1=r(ue68_1B+ftStd*stundensatz+ftStd*stundensatz)
+  const frei68_1=r(Math.min(W.frei68_1,topf68_1))
+  // §68/2: Überstundenzuschläge (Sa 50%, über 10h, 50h-Woche, ZA-Überlauf) — erste 15 h, je h max. 50% Grundlohn, max. 170 €
+  const ueStdOhneFt=r(Math.max(0,ue68_2-ftStd))
+  const topf68_2Std=r(ue50+ueStdOhneFt+zaUeberlauf)
+  const topf68_2=r(ue50B+ueStdOhneFt*stundensatz+zaUeberlaufZuschlagB)
+  const frei68_2=r(Math.min(W.frei68_2,topf68_2,0.5*stundensatz*Math.min(W.frei68_2Std,topf68_2Std)))
+
+  // SV laufend: alles außer steuerfreiem Taggeld und HO-Pauschale, gedeckelt bei der Höchstbeitragsgrundlage
+  const svBasisRoh=r(lfdBrutto-tgFrei-hoFrei)
+  const svBasis=r(Math.min(svBasisRoh,W.hbglMonat))
+  const svR=svSatzLfd(svBasis)
+  const svB=r(svBasis*svR)
+  const stpflB=r(lfdBrutto-tgFrei-hoFrei-frei68_1-frei68_2)
+  const bmgLfd=r(stpflB-svB-W.wkPausch/12)
+  const ls=lstMonat(bmgLfd)
+
+  // ── Sonderzahlungen §67 (Urlaubsgeld + begünstigte Prämien) ──────────────
+  const ugBrutto=urlaubsgeldAktiv?urlaubsgeldBetrag:0
+  const szBrutto=r(ugBrutto+extrasSZ)
+  const jahressechstel=r(grundgehalt*2)  // Näherung: 2 Monatsgehälter
+  const szIn=r(Math.min(szBrutto,jahressechstel)),szUeber=r(szBrutto-szIn)
+  const szSVR=svSatzSZ(szBrutto)
+  const szSV=r(Math.min(szBrutto,W.hbglSZJahr)*szSVR)
+  const svIn=szBrutto>0?r(szSV*szIn/szBrutto):0,svUeber=r(szSV-svIn)
+  // 6% nach Abzug der SV; Freibetrag 620 €, Freigrenze 2.100 € (Annahme: erste Sonderzahlung im Jahr)
+  const basis6=r(szIn-svIn)
+  const szLS6=basis6<=W.szFreigrenze?0:r(W.szSatz*Math.max(0,basis6-W.szFreibetrag))
+  // Teil über dem Jahressechstel wird wie ein laufender Bezug versteuert
+  const szLSUeber=szUeber>0?r(lstMonat(bmgLfd+szUeber-svUeber)-ls):0
+
+  const summeBrutto=r(lfdBrutto+extrasFrei+szBrutto)
+  const netto=r(summeBrutto-svB-szSV-ls-szLS6-szLSUeber)
   return{grundgehalt,ue50Std:ue50,ue50B,ue68_1Std:ue68_1,ue68_1B,ue68_2Std:ue68_2,ue68_2B,
     ueGrundStd,ueGrundStdBase,zaUeberlauf,zaUeberlaufZuschlagB,ueGrundB,onSiteStd,onSiteB,taggelder:mt.length,tgB,lkStd:lenkzeit,lkB,
-    hoTage:hoTage.length,hoPauschale,
-    ugBrutto,ugBegunstigt,ugUeberUeberschuss,ugSV,ugLS_beg,ugLS_ueb,ugNetto,jahressechstel,
-    extrasCalc,extrasBruttoTotal,extrasSteuerfreiTotal,extrasSVTotal,extrasLSTotal,
-    summeBrutto,stpflB,svB,ls,netto,svR,
+    hoTage:hoTage.length,hoPauschale,hoFrei,tgFrei,tgStpfl,
+    topf68_1,frei68_1,topf68_2,topf68_2Std,frei68_2,
+    ugBrutto,extrasSZ,szBrutto,szIn,szUeber,szSV,szSVR,szLS6,szLSUeber,jahressechstel,
+    extrasCalc,extrasBruttoTotal,extrasFrei,extrasLfd,
+    lfdBrutto,summeBrutto,stpflB,svBasis,svBasisRoh,svB,svR,ls,netto,
     zaTopfNeu,zaTopfSaldo,zaTopfEnde,zaTopfMax,zaTopfStart,stundensatz,taggeld}
 }
 
@@ -1185,7 +1197,7 @@ function render(){
   document.getElementById('grundgehalt-label').textContent=state.lehrling?'Lehrlingsentsch. (€/Mon)':'Grundgehalt (€/Mon)'
   const lh=document.getElementById('lehrling-hint')
   lh.style.display=state.lehrling?'block':'none'
-  lh.textContent='Lehrling: SV-Dienstnehmeranteil '+svLabel(lz.svR)+' (KV 1,67% + PV 10,25% + AV '+svLabel(lz.svR-0.1192)+', keine AK-Umlage / WBF). Lohnsteuer nach normalem Tarif. Unter 18 J. sind Überstunden laut KJBG grundsätzlich nicht erlaubt.'
+  lh.textContent='Lehrling: SV-Dienstnehmeranteil '+svLabel(lz.svR)+' (KV 1,67% + PV 10,25% + AV '+svLabel(avSatz(lz.svBasis))+', keine AK-Umlage / WBF). Lohnsteuer nach normalem Tarif. Unter 18 J. sind Überstunden laut KJBG grundsätzlich nicht erlaubt.'
 
   // ── za-box unter Lohnzettel-Tabelle ───────────────────────────────────────
   const zaEl=document.getElementById('za-box')
@@ -1207,33 +1219,40 @@ function render(){
     const stLabel=e.steuer==='steuerfrei'?'steuerfrei':e.steuer==='begunstigt'?'§67 6%':'stpfl.'
     return bnRow((e.name||'Prämie/Zulage')+' ('+stLabel+')',e.brutto,false,false,true)
   }).join('')
-  const extrasSVBlock=(lz.extrasSVTotal>0?bnRow('SV Prämien/Zuschläge',-lz.extrasSVTotal,false,false,true):'')
-  const extrasLSBlock=(lz.extrasLSTotal>0?bnRow('LS Prämien/Zuschläge',-lz.extrasLSTotal,false,false,true):'')
+  const sub=t=>`<p style="font-size:11px;color:var(--faint);margin:0 0 4px;font-weight:500;">${t}</p>`
+  const note=t=>`<p style="font-size:11px;color:var(--faint);margin:0 0 4px 16px;">${t}</p>`
+  const andereBrutto=lz.ugBrutto>0||lz.extrasBruttoTotal>0
   document.getElementById('bn-section').innerHTML=
     bnRow('Brutto gesamt',lz.summeBrutto,true,true,false)+
-    ((lz.ugBrutto>0||lz.extrasBruttoTotal>0)?
-      bnRow('davon laufende Bezüge',lz.summeBrutto-lz.ugBrutto-lz.extrasBruttoTotal,false,false,true)+
+    (andereBrutto?
+      bnRow('davon laufende Bezüge',lz.lfdBrutto-lz.extrasLfd,false,false,true)+
       (lz.ugBrutto>0?bnRow('davon Urlaubsgeld',lz.ugBrutto,false,false,true):'')+
       (lz.extrasBruttoTotal>0?'<p style="font-size:11px;color:var(--faint);margin:4px 0 2px 16px;font-weight:500;">davon Prämien &amp; Zuschläge</p>'+extrasBlock:''):'')+
-    '<hr class="bn-sep">'+
-    '<p style="font-size:11px;color:var(--faint);margin:0 0 4px;font-weight:500;">Steuerfreie Bestandteile (lfd.)</p>'+
-    bnRow('Taggeld Ausland',lz.tgB,false,false,true)+
-    bnRow('Sa-Zuschlag 50% + §68/1 + §68/2',lz.ue50B+lz.ue68_1B+lz.ue68_2B,false,false,true)+
-    (lz.extrasSteuerfreiTotal>0?bnRow('Steuerfreie Zuschläge',lz.extrasSteuerfreiTotal,false,false,true):'')+
+    '<hr class="bn-sep">'+sub('Steuerfreie Bestandteile (lfd.)')+
+    (lz.tgB>0?bnRow('Taggeld (bis Satz je Land)',lz.tgFrei,false,false,true)+
+      (lz.tgStpfl>0?note('Taggeld über dem steuerfreien Satz: '+fmt(lz.tgStpfl)+' € → steuer- und SV-pflichtig'):''):'')+
+    (lz.topf68_1>0?bnRow('Sonn-/Feiertag §68/1 (max. 400 €)',lz.frei68_1,false,false,true)+
+      (lz.topf68_1>lz.frei68_1?note('von '+fmt(lz.topf68_1)+' € — Rest '+fmt(lz.topf68_1-lz.frei68_1)+' € steuerpflichtig'):''):'')+
+    (lz.topf68_2>0?bnRow('Überstundenzuschläge §68/2 (15 h, max. 170 €)',lz.frei68_2,false,false,true)+
+      (lz.topf68_2>lz.frei68_2?note('von '+fmt(lz.topf68_2)+' € ('+fmtH(lz.topf68_2Std)+' h) — Rest '+fmt(lz.topf68_2-lz.frei68_2)+' € steuerpflichtig'):''):'')+
+    (lz.hoFrei>0?bnRow('Homeoffice-Pauschale',lz.hoFrei,false,false,true):'')+
+    (lz.extrasFrei>0?bnRow('Steuerfreie Prämien',lz.extrasFrei,false,false,true):'')+
+    (lz.tgB+lz.topf68_1+lz.topf68_2+lz.hoFrei+lz.extrasFrei===0?note('keine'):'')+
     '<hr class="bn-sep">'+bnRow('Stpfl. lfd. Brutto',lz.stpflB,false,false,false)+
     '<p style="font-size:11px;color:var(--faint);margin:8px 0 4px;font-weight:500;">Abzüge lfd. Bezüge</p>'+
-    bnRow('SV-Beitrag ~'+svLabel(lz.svR)+(state.lehrling?' (Lehrling)':''),-lz.svB,false,false,true)+
-    bnRow('Lohnsteuer (progressiv AT)',-lz.ls,false,false,true)+
-    (lz.ugBrutto>0?'<hr class="bn-sep"><p style="font-size:11px;color:var(--faint);margin:0 0 4px;font-weight:500;">Urlaubsgeld §67 EStG</p>'+
-      bnRow('Begünstigter Teil (6% LS)',lz.ugBegunstigt,false,false,true)+
-      (lz.ugUeberUeberschuss>0?bnRow('Überschuss über Jahressechstel',lz.ugUeberUeberschuss,false,false,true):'')+
-      bnRow('SV Urlaubsgeld',-lz.ugSV,false,false,true)+
-      bnRow('LS Urlaubsgeld (6% + progressiv)',-lz.ugLS_beg-lz.ugLS_ueb,false,false,true)+
-      `<p style="font-size:11px;color:var(--faint);margin:2px 0 0 16px;">Jahressechstel (Näherung): ${fmt(lz.jahressechstel)} €</p>`:'')+
-    ((lz.extrasSVTotal>0||lz.extrasLSTotal>0)?'<hr class="bn-sep"><p style="font-size:11px;color:var(--faint);margin:0 0 4px;font-weight:500;">Abzüge Prämien &amp; Zuschläge</p>'+extrasSVBlock+extrasLSBlock:'')+
+    bnRow('SV-Beitrag '+svLabel(lz.svR)+(state.lehrling?' (Lehrling)':''),-lz.svB,false,false,true)+
+    (lz.svBasisRoh>lz.svBasis?note('gedeckelt bei der Höchstbeitragsgrundlage '+fmt(W.hbglMonat)+' €'):'')+
+    bnRow('Lohnsteuer (Tarif 2026)',-lz.ls,false,false,true)+
+    (lz.szBrutto>0?'<hr class="bn-sep">'+sub('Sonderzahlungen §67 EStG')+
+      (lz.ugBrutto>0?bnRow('Urlaubsgeld',lz.ugBrutto,false,false,true):'')+
+      (lz.extrasSZ>0?bnRow('§67-Prämien',lz.extrasSZ,false,false,true):'')+
+      bnRow('SV Sonderzahlung '+svLabel(lz.szSVR),-lz.szSV,false,false,true)+
+      bnRow('Lohnsteuer 6% (620 € frei)',-lz.szLS6,false,false,true)+
+      (lz.szUeber>0?bnRow('LS Teil über Jahressechstel',-lz.szLSUeber,false,false,true):'')+
+      note('Jahressechstel (Näherung 2 × Grundgehalt): '+fmt(lz.jahressechstel)+' €'):'')+
     '<hr class="bn-sep strong">'+
     bnRow('~ Netto gesamt (Schätzwert ±)',lz.netto,true,true,false)+
-    '<p style="font-size:11px;color:var(--faint);margin:8px 0 0;">SV ~'+svLabel(lz.svR)+', Lohnsteuer progressiv, §67 EStG mit 6% begünstigt — nur Näherungswerte.</p>'
+    '<p style="font-size:11px;color:var(--faint);margin:8px 0 0;line-height:1.5;">Werte 2026: SV gedeckelt bei '+fmt(W.hbglMonat)+' €, Lohnsteuer-Tarif 2026 inkl. Verkehrsabsetzbetrag, Zuschläge steuerfrei nach §68 (400 € / 15 h bzw. 170 €), Taggeld bis zum Satz des Einsatzlandes. Pendlerpauschale, Familienbonus usw. sind nicht berücksichtigt — Näherungswerte.</p>'
 
   // Detail table — alle Tage mit Eintrag, gruppiert nach Kalenderwoche mit Wochensumme
   const detailTage=alleTage.filter(t=>t.gesamtStunden>0||t.abwStunden>0)

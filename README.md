@@ -19,6 +19,17 @@ Eine einzige HTML-Datei ohne Installation und ohne Server. Alle Daten bleiben im
 - **Einstellungen** für Grundlohn und Standard-Stunden pro Leistungsart
 - Hell- und Dunkelmodus
 
+## Rechengrundlagen (Stand 2026)
+
+- **SV-Dienstnehmeranteil** 18,07 %, AV-Anteil bei geringem Einkommen reduziert, gedeckelt bei der Höchstbeitragsgrundlage von 6.930 €/Monat. Bei Sonderzahlungen sind es 17,07 %.
+- **Lohnsteuer** nach dem Tarif 2026, inklusive Verkehrsabsetzbetrag (496 €) und Werbungskostenpauschale
+- **Steuerfreie Zuschläge (§68 EStG):**
+  - Sonn- und Feiertagszuschläge plus Feiertagsarbeitsentgelt bis 400 €/Monat
+  - Überstundenzuschläge für die ersten 15 Stunden, höchstens 170 €/Monat
+- **Taggeld** steuer- und SV-frei bis zum Inlands- bzw. Auslandsreisesatz des Einsatzlandes, z. B. Deutschland 35,30 €. Der Rest ist steuerpflichtig.
+- **Sonderzahlungen** mit 6 % nach Abzug der SV, 620 € Freibetrag, 2.100 € Freigrenze
+- Nicht berücksichtigt: Pendlerpauschale, Familienbonus und andere persönliche Absetzbeträge
+
 ## Benutzung
 
 - **Online:** über GitHub Pages öffnen (Link rechts unter „About“ bzw. in den Repository-Einstellungen)
